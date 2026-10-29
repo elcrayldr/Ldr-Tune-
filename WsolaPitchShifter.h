@@ -6,7 +6,11 @@
 
 namespace CrayDSP
 {
-/** Pitch shifter WSOLA causal para correccion vocal (+/-300 cents tipico). Latencia fija = grainSize. */
+/**
+ * Low-latency dual-read-head pitch shifter for monophonic vocal correction.
+ * Two continuously moving delay taps are crossfaded to hide the delay reset.
+ * This is not WSOLA time-stretching; the read-head slope changes the pitch.
+ */
 class WsolaPitchShifter
 {
 public:
@@ -16,153 +20,126 @@ public:
     {
         m_sampleRate = static_cast<float>(sampleRate);
         m_maxBlockSize = maxBlockSize;
-
-        m_bufferSize = 2048;
+        m_bufferSize = 4096;
         m_bufferMask = m_bufferSize - 1;
-
         m_inputRingBuffer.assign(static_cast<size_t>(m_bufferSize), 0.0f);
-        m_outputAccumBuffer.assign(static_cast<size_t>(m_bufferSize), 0.0f);
-        m_windowWeightBuffer.assign(static_cast<size_t>(m_bufferSize), 0.0f);
-        m_hanningWindow.assign(static_cast<size_t>(kMaxGrain), 0.0f);
-
         setGrainSize(m_grainSize);
     }
 
-    /** Cambia el tamano de grano (= latencia en muestras). Sin alocaciones; reinicia el estado. */
+    /** Grain controls the delay excursion and approximate fixed latency. */
     void setGrainSize(int grain)
     {
         m_grainSize = std::clamp(grain, 32, kMaxGrain);
-        m_hopSize = m_grainSize / 4;                     // 75 % de solape
-        m_searchRange = std::max(16, m_grainSize / 4);
-
-        for (int i = 0; i < m_grainSize; ++i)
-            m_hanningWindow[static_cast<size_t>(i)] = 0.5f * (1.0f - std::cos(2.0f * 3.1415926535f * static_cast<float>(i) / static_cast<float>(m_grainSize)));
-
+        m_minDelay = 4.0f;
+        m_maxDelay = static_cast<float>(m_grainSize - 4);
+        m_delayRange = std::max(8.0f, m_maxDelay - m_minDelay);
         reset();
     }
 
     void reset()
     {
         std::fill(m_inputRingBuffer.begin(), m_inputRingBuffer.end(), 0.0f);
-        std::fill(m_outputAccumBuffer.begin(), m_outputAccumBuffer.end(), 0.0f);
-        std::fill(m_windowWeightBuffer.begin(), m_windowWeightBuffer.end(), 0.0f);
-
-        m_inWritePos = 0;
-        m_outReadPos = 0;
-        m_hopSampleCounter = 0;
+        m_writePos = 0;
+        m_phase = 0.0f;
         m_targetRatio = 1.0f;
         m_currentRatio = 1.0f;
-        m_virtualSynthesisPos = 0.0f;
-        m_lastBestOffset = 0;
+        m_activeMix = 0.0f;
     }
 
-    void setShiftRatio(float ratio) { m_targetRatio = std::clamp(ratio, 0.5f, 2.0f); }
+    void setShiftRatio(float ratio)
+    {
+        if (!std::isfinite(ratio))
+            ratio = 1.0f;
+        m_targetRatio = std::clamp(ratio, 0.5f, 2.0f);
+    }
 
-    int getLatencySamples() const { return m_grainSize; }
+    // The unity path uses a fixed centre tap; report that actual delay to the host.
+    int getLatencySamples() const { return m_grainSize / 2; }
 
     float processSample(float inSample)
     {
         if (!std::isfinite(inSample))
             inSample = 0.0f;
 
-        m_inputRingBuffer[static_cast<size_t>(m_inWritePos)] = inSample;
-        m_inWritePos = (m_inWritePos + 1) & m_bufferMask;
+        m_inputRingBuffer[static_cast<size_t>(m_writePos)] = inSample;
+        m_writePos = (m_writePos + 1) & m_bufferMask;
 
-        if (++m_hopSampleCounter >= m_hopSize)
+        // Smooth pitch-ratio changes to avoid abrupt read-head velocity changes.
+        m_currentRatio += (m_targetRatio - m_currentRatio) * 0.02f;
+        const float deviation = std::abs(m_currentRatio - 1.0f);
+        const float activeTarget = deviation > 0.0015f ? 1.0f : 0.0f;
+        const float mixCoeff = 1.0f - std::exp(-1.0f / (0.005f * std::max(1.0f, m_sampleRate)));
+        m_activeMix += (activeTarget - m_activeMix) * mixCoeff;
+
+        const float centreDelay = 0.5f * (m_minDelay + m_maxDelay);
+        const float dryAligned = readDelay(centreDelay);
+
+        if (m_activeMix < 0.0001f)
         {
-            m_hopSampleCounter = 0;
-            m_currentRatio += (m_targetRatio - m_currentRatio) * 0.25f;
-            synthesizeNextGrain();
+            // Keep the pitch-shifter phase deterministic when correction is inactive.
+            m_phase = 0.0f;
+            return dryAligned;
         }
 
-        const int rPos = m_outReadPos;
-        float outSample = 0.0f;
-        const float weight = m_windowWeightBuffer[static_cast<size_t>(rPos)];
+        const bool shiftUp = m_currentRatio > 1.0f;
+        const float delay1 = shiftUp
+            ? (m_maxDelay - m_phase * m_delayRange)
+            : (m_minDelay + m_phase * m_delayRange);
 
-        if (weight > 1e-4f)
-        {
-            outSample = m_outputAccumBuffer[static_cast<size_t>(rPos)] / weight;
-        }
-        else
-        {
-            const int delayIdx = (m_inWritePos - 1 - m_grainSize) & m_bufferMask;
-            outSample = m_inputRingBuffer[static_cast<size_t>(delayIdx)];
-        }
+        float phase2 = m_phase + 0.5f;
+        if (phase2 >= 1.0f)
+            phase2 -= 1.0f;
 
-        m_outputAccumBuffer[static_cast<size_t>(rPos)] = 0.0f;
-        m_windowWeightBuffer[static_cast<size_t>(rPos)] = 0.0f;
+        const float delay2 = shiftUp
+            ? (m_maxDelay - phase2 * m_delayRange)
+            : (m_minDelay + phase2 * m_delayRange);
 
-        m_outReadPos = (m_outReadPos + 1) & m_bufferMask;
-        return outSample;
+        // Hann crossfade: one head fades out exactly as the other fades in.
+        const float w1 = 0.5f - 0.5f * std::cos(6.28318530718f * m_phase);
+        const float w2 = 1.0f - w1;
+        const float shifted = readDelay(delay1) * w1 + readDelay(delay2) * w2;
+
+        // At very small corrections, blend smoothly to the fixed-delay path.
+        const float out = dryAligned + m_activeMix * (shifted - dryAligned);
+
+        const float phaseStep = std::abs(1.0f - m_currentRatio) / m_delayRange;
+        m_phase += phaseStep;
+        if (m_phase >= 1.0f)
+            m_phase -= std::floor(m_phase);
+
+        return std::isfinite(out) ? out : dryAligned;
     }
 
 private:
-    void synthesizeNextGrain()
+    float readDelay(float delaySamples) const
     {
-        const float theoreticalAnalysisOffset = m_virtualSynthesisPos;
-        m_virtualSynthesisPos += static_cast<float>(m_hopSize) * (m_currentRatio - 1.0f);
-
-        const float maxAllowedDrift = static_cast<float>(m_grainSize);
-        m_virtualSynthesisPos = std::clamp(m_virtualSynthesisPos, -maxAllowedDrift, maxAllowedDrift);
-
-        const int nominalReadAnchor = (m_inWritePos - 1 - m_grainSize - static_cast<int>(theoreticalAnalysisOffset)) & m_bufferMask;
-
-        int bestDelta = 0;
-        float bestCorr = -1e9f;
-
-        for (int delta = -m_searchRange; delta <= m_searchRange; delta += 2)
-        {
-            float corr = 0.0f;
-            for (int k = 0; k < m_searchRange; k += 4)
-            {
-                const int idxRef = (nominalReadAnchor + m_lastBestOffset + k) & m_bufferMask;
-                const int idxCand = (nominalReadAnchor + delta + k) & m_bufferMask;
-                corr += m_inputRingBuffer[static_cast<size_t>(idxRef)] * m_inputRingBuffer[static_cast<size_t>(idxCand)];
-            }
-
-            if (corr > bestCorr)
-            {
-                bestCorr = corr;
-                bestDelta = delta;
-            }
-        }
-
-        m_lastBestOffset = bestDelta;
-        const int finalReadPos = (nominalReadAnchor + bestDelta) & m_bufferMask;
-
-        for (int i = 0; i < m_grainSize; ++i)
-        {
-            const int inIdx = (finalReadPos + i) & m_bufferMask;
-            const int outIdx = (m_outReadPos + i) & m_bufferMask;
-
-            const float win = m_hanningWindow[static_cast<size_t>(i)];
-            m_outputAccumBuffer[static_cast<size_t>(outIdx)] += m_inputRingBuffer[static_cast<size_t>(inIdx)] * win;
-            m_windowWeightBuffer[static_cast<size_t>(outIdx)] += win;
-        }
+        // Linear interpolation keeps the reader fractional and avoids discontinuities.
+        const float readPos = static_cast<float>(m_writePos) - delaySamples;
+        const float wrapped = readPos < 0.0f ? readPos + static_cast<float>(m_bufferSize) : readPos;
+        const int index0 = static_cast<int>(wrapped) & m_bufferMask;
+        const int index1 = (index0 + 1) & m_bufferMask;
+        const float fraction = wrapped - std::floor(wrapped);
+        const float a = m_inputRingBuffer[static_cast<size_t>(index0)];
+        const float b = m_inputRingBuffer[static_cast<size_t>(index1)];
+        return a + fraction * (b - a);
     }
 
     float m_sampleRate = 48000.0f;
     int m_maxBlockSize = 512;
     static constexpr int kMaxGrain = 256;
     int m_grainSize = 64;
-    int m_hopSize = 16;
-    int m_searchRange = 16;
 
-    int m_bufferSize = 2048;
-    int m_bufferMask = 2047;
-
+    int m_bufferSize = 4096;
+    int m_bufferMask = 4095;
     std::vector<float> m_inputRingBuffer;
-    std::vector<float> m_outputAccumBuffer;
-    std::vector<float> m_windowWeightBuffer;
-    std::vector<float> m_hanningWindow;
 
-    int m_inWritePos = 0;
-    int m_outReadPos = 0;
-    int m_hopSampleCounter = 0;
-
+    float m_minDelay = 4.0f;
+    float m_maxDelay = 60.0f;
+    float m_delayRange = 56.0f;
+    int m_writePos = 0;
+    float m_phase = 0.0f;
     float m_targetRatio = 1.0f;
     float m_currentRatio = 1.0f;
-    float m_virtualSynthesisPos = 0.0f;
-    int m_lastBestOffset = 0;
+    float m_activeMix = 0.0f;
 };
 } // namespace CrayDSP
