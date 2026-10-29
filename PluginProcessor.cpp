@@ -12,7 +12,7 @@ CrayLdrRealtimeTuneAudioProcessor::CrayLdrRealtimeTuneAudioProcessor()
     for (size_t i = 0; i < 12; ++i)
         m_customNotes[i].store (defaults[i]);
 
-    setLatencySamples (64);
+    setLatencySamples (112);
 }
 
 CrayLdrRealtimeTuneAudioProcessor::~CrayLdrRealtimeTuneAudioProcessor() {}
@@ -103,8 +103,9 @@ void CrayLdrRealtimeTuneAudioProcessor::prepareToPlay (double sampleRate, int sa
 
 void CrayLdrRealtimeTuneAudioProcessor::applyMode (int modeIdx)
 {
-    // CLASSIC: grano 64 (latencia 64 muestras, sonido duro). MODERN: grano 192 (192 muestras, mas natural)
-    const int grain = (modeIdx == 0) ? 64 : 192;
+    // Granos mas largos reducen los saltos de fase del pitch shifter. La latencia declarada es grain / 2.
+    // CLASSIC prioriza respuesta; MODERN usa un grano algo mayor para una transicion mas suave.
+    const int grain = (modeIdx == 0) ? 224 : 256;
     m_pitchShifterL.setGrainSize (grain);
     m_pitchShifterR.setGrainSize (grain);
     m_envelopeShiftCents = 0.0f;
