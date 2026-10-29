@@ -1,0 +1,49 @@
+name: Build CRAY LDR REALTIME TUNE (Windows VST3)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vst3:
+    name: Compile VST3 x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure CMake
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: cmake --build build --config Release --target CrayLdrRealtimeTune_VST3 --parallel
+
+      - name: Verify VST3 output
+        shell: pwsh
+        run: |
+          $plugin = Get-ChildItem -Path "build" -Directory -Recurse -Filter "*.vst3" | Select-Object -First 1
+          if (-not $plugin) {
+            Write-Error "No se ha encontrado ninguna carpeta .vst3 en build."
+            Get-ChildItem -Path "build" -Recurse | Select-Object -First 200 FullName
+            exit 1
+          }
+          Write-Host "Plugin generado: $($plugin.FullName)"
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRAY-LDR-REALTIME-TUNE-Windows-VST3
+          path: build/**/*.vst3/**
+          if-no-files-found: error
+          retention-days: 14
