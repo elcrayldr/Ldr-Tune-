@@ -24,10 +24,16 @@ jobs:
           arch: x64
 
       - name: Configure CMake
-        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBUILD_DSP_TESTS=ON
 
       - name: Build VST3
         run: cmake --build build --config Release --target CrayLdrRealtimeTune_VST3 --parallel
+
+      - name: Build DSP unit tests
+        run: cmake --build build --config Release --target CrayLdrDspTests --parallel
+
+      - name: Run DSP unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Verify VST3 output
         shell: pwsh
