@@ -58,6 +58,7 @@ int main()
     {   // 5. WSOLA estable
         CrayDSP::WsolaPitchShifter s;
         s.prepare(sampleRate, 256);
+        s.setGrainSize(224);
         s.setShiftRatio(1.05946f);
         bool ok = true;
         int crossings = 0;
@@ -75,13 +76,13 @@ int main()
         test("5. Pitch shifter output remains finite and bounded", ok);
         std::cout << "[INFO] Pitch shifter measured frequency: " << measuredHz << " Hz (target ~233.08 Hz)" << std::endl;
         test("6. Pitch ratio shifts 220 Hz toward 233 Hz", std::abs(measuredHz - 220.0f * 1.05946f) < 8.0f);
-        test("7. CLASSIC reports 32-sample fixed delay", s.getLatencySamples() == 32);
+        test("7. CLASSIC reports 112-sample fixed delay", s.getLatencySamples() == 112);
     }
 
-    {   // 7. Modo MODERN: grano 192
+    {   // 8. Modo MODERN: grano 256
         CrayDSP::WsolaPitchShifter s;
         s.prepare(sampleRate, 256);
-        s.setGrainSize(192);
+        s.setGrainSize(256);
         s.setShiftRatio(0.95f);
         bool ok = true;
         for (int i = 0; i < 4096 && ok; ++i)
@@ -89,7 +90,7 @@ int main()
             float out = s.processSample(std::sin(twoPi * 150.0f * static_cast<float>(i) / static_cast<float>(sampleRate)));
             if (!std::isfinite(out) || std::abs(out) > 3.0f) ok = false;
         }
-        test("8. MODERN reports 96-sample fixed delay and stable output", ok && s.getLatencySamples() == 96);
+        test("8. MODERN reports 128-sample fixed delay and stable output", ok && s.getLatencySamples() == 128);
     }
 
     std::cout << "\nRESULTADOS: " << passed << " pasados, " << failed << " fallidos\n";
