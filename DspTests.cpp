@@ -66,7 +66,7 @@ int main()
             if (!std::isfinite(out) || std::abs(out) > 3.0f) ok = false;
         }
         test("5. WSOLA: salida finita y acotada", ok);
-        test("6. WSOLA: latencia declarada 64 muestras", s.getLatencySamples() == 64);
+        test("6. WSOLA: latencia fija real de 32 muestras", s.getLatencySamples() == 32);
     }
 
     {   // 7. Modo MODERN: grano 192
@@ -80,7 +80,7 @@ int main()
             float out = s.processSample(std::sin(twoPi * 150.0f * static_cast<float>(i) / static_cast<float>(sampleRate)));
             if (!std::isfinite(out) || std::abs(out) > 3.0f) ok = false;
         }
-        test("7. WSOLA MODERN: latencia 192 y salida estable", ok && s.getLatencySamples() == 192);
+        test("7. WSOLA MODERN: latencia fija real de 96 muestras y salida estable", ok && s.getLatencySamples() == 96);
     }
 
     std::cout << "\nRESULTADOS: " << passed << " pasados, " << failed << " fallidos\n";
