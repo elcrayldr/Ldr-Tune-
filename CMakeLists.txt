@@ -4,22 +4,15 @@ project(CrayLdrRealtimeTune VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# JUCE: carpeta local "JUCE" si existe; si no, se descarga la 7.0.9 automaticamente
-if(NOT TARGET juce::juce_audio_processors)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/JUCE")
-        add_subdirectory(JUCE)
-    else()
-        include(FetchContent)
-        message(STATUS "Descargando JUCE 7.0.9...")
-        FetchContent_Declare(
-            juce
-            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-            GIT_TAG 7.0.9
-            GIT_SHALLOW TRUE
-        )
-        FetchContent_MakeAvailable(juce)
-    endif()
-endif()
+# JUCE se descarga automaticamente si no existe una copia local.
+include(FetchContent)
+FetchContent_Declare(
+    juce
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG 7.0.9
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(juce)
 
 juce_add_plugin(CrayLdrRealtimeTune
     COMPANY_NAME "CRAY LDR DSP"
@@ -35,16 +28,19 @@ juce_add_plugin(CrayLdrRealtimeTune
     PRODUCT_NAME "CRAY LDR REALTIME TUNE"
 )
 
+# Los .cpp y .h estan actualmente en la raiz del repositorio.
 target_sources(CrayLdrRealtimeTune PRIVATE
-    Source/PluginProcessor.cpp
-    Source/PluginProcessor.h
-    Source/PluginEditor.cpp
-    Source/PluginEditor.h
-    Source/DSP/YinPitchDetector.h
-    Source/DSP/ScaleQuantizer.h
-    Source/DSP/WsolaPitchShifter.h
-    Source/UI/CrayCustomLookAndFeel.h
+    PluginProcessor.cpp
+    PluginProcessor.h
+    PluginEditor.cpp
+    PluginEditor.h
+    YinPitchDetector.h
+    ScaleQuantizer.h
+    WsolaPitchShifter.h
+    CrayCustomLookAndFeel.h
 )
+
+target_include_directories(CrayLdrRealtimeTune PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 target_compile_definitions(CrayLdrRealtimeTune PRIVATE
     JUCE_WEB_BROWSER=0
@@ -65,12 +61,12 @@ target_link_libraries(CrayLdrRealtimeTune
 )
 
 if (MSVC)
-    target_compile_options(CrayLdrRealtimeTune PRIVATE /O2 /Oi /Ot /fp:fast /arch:AVX2 /MP)
+    target_compile_options(CrayLdrRealtimeTune PRIVATE /O2 /Oi /Ot /fp:fast /MP)
 endif()
 
-# Tests DSP (opcional): cmake -B build -DBUILD_DSP_TESTS=ON
 option(BUILD_DSP_TESTS "Compilar tests DSP" OFF)
 if(BUILD_DSP_TESTS)
-    add_executable(CrayLdrDspTests Tests/DspTests.cpp)
+    add_executable(CrayLdrDspTests DspTests.cpp)
+    target_include_directories(CrayLdrDspTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_features(CrayLdrDspTests PRIVATE cxx_std_20)
 endif()
