@@ -3,7 +3,7 @@
 #include <memory>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
-#include "UI/CrayCustomLookAndFeel.h"
+#include "CrayCustomLookAndFeel.h"
 
 class CrayLdrRealtimeTuneAudioProcessorEditor : public juce::AudioProcessorEditor,
                                                 private juce::Timer
