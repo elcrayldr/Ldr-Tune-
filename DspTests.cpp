@@ -73,6 +73,7 @@ int main()
         }
         const float measuredHz = static_cast<float>(crossings) * static_cast<float>(sampleRate) / static_cast<float>(measurementSamples);
         test("5. Pitch shifter output remains finite and bounded", ok);
+        std::cout << "[INFO] Pitch shifter measured frequency: " << measuredHz << " Hz (target ~233.08 Hz)" << std::endl;
         test("6. Pitch ratio shifts 220 Hz toward 233 Hz", std::abs(measuredHz - 220.0f * 1.05946f) < 8.0f);
         test("7. CLASSIC reports 32-sample fixed delay", s.getLatencySamples() == 32);
     }
