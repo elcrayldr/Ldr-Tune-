@@ -60,13 +60,21 @@ int main()
         s.prepare(sampleRate, 256);
         s.setShiftRatio(1.05946f);
         bool ok = true;
-        for (int i = 0; i < 4096 && ok; ++i)
+        int crossings = 0;
+        float previous = 0.0f;
+        constexpr int measurementStart = 2048;
+        constexpr int measurementSamples = 6144;
+        for (int i = 0; i < measurementStart + measurementSamples; ++i)
         {
-            float out = s.processSample(std::sin(twoPi * 220.0f * static_cast<float>(i) / static_cast<float>(sampleRate)));
+            const float out = s.processSample(std::sin(twoPi * 220.0f * static_cast<float>(i) / static_cast<float>(sampleRate)));
             if (!std::isfinite(out) || std::abs(out) > 3.0f) ok = false;
+            if (i >= measurementStart && previous <= 0.0f && out > 0.0f) ++crossings;
+            previous = out;
         }
-        test("5. WSOLA: salida finita y acotada", ok);
-        test("6. WSOLA: latencia fija real de 32 muestras", s.getLatencySamples() == 32);
+        const float measuredHz = static_cast<float>(crossings) * static_cast<float>(sampleRate) / static_cast<float>(measurementSamples);
+        test("5. Pitch shifter output remains finite and bounded", ok);
+        test("6. Pitch ratio shifts 220 Hz toward 233 Hz", std::abs(measuredHz - 220.0f * 1.05946f) < 8.0f);
+        test("7. CLASSIC reports 32-sample fixed delay", s.getLatencySamples() == 32);
     }
 
     {   // 7. Modo MODERN: grano 192
@@ -80,7 +88,7 @@ int main()
             float out = s.processSample(std::sin(twoPi * 150.0f * static_cast<float>(i) / static_cast<float>(sampleRate)));
             if (!std::isfinite(out) || std::abs(out) > 3.0f) ok = false;
         }
-        test("7. WSOLA MODERN: latencia fija real de 96 muestras y salida estable", ok && s.getLatencySamples() == 96);
+        test("8. MODERN reports 96-sample fixed delay and stable output", ok && s.getLatencySamples() == 96);
     }
 
     std::cout << "\nRESULTADOS: " << passed << " pasados, " << failed << " fallidos\n";
