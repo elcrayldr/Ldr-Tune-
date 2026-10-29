@@ -3,9 +3,9 @@
 #include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
-#include "DSP/YinPitchDetector.h"
-#include "DSP/ScaleQuantizer.h"
-#include "DSP/WsolaPitchShifter.h"
+#include "YinPitchDetector.h"
+#include "ScaleQuantizer.h"
+#include "WsolaPitchShifter.h"
 
 class CrayLdrRealtimeTuneAudioProcessor : public juce::AudioProcessor
 {
