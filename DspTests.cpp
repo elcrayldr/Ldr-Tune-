@@ -1,9 +1,9 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
-#include "../Source/DSP/YinPitchDetector.h"
-#include "../Source/DSP/ScaleQuantizer.h"
-#include "../Source/DSP/WsolaPitchShifter.h"
+#include "YinPitchDetector.h"
+#include "ScaleQuantizer.h"
+#include "WsolaPitchShifter.h"
 
 int main()
 {
